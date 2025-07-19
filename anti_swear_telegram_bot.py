@@ -22,7 +22,7 @@ ban_duration = timedelta(minutes=ban_minutes) if ban_minutes > 0 else None
 
 # Ollama клиент
 ollama = Client(host='http://localhost:11434')
-OLLAMA_MODEL = "llama3"  # или "mistral", "deepseek-llm" и т.д.
+OLLAMA_MODEL = "deepseek-r1:8b"  # или "mistral", "deepseek-llm" и т.д.
 
 # Чтение запрещенных слов
 with open('./banword.txt', 'r', encoding='utf-8') as file:
