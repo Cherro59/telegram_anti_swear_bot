@@ -7,7 +7,9 @@ from dotenv import load_dotenv
 import json
 import re 
 from ollama import Client  # Добавляем клиент Ollama
-
+import aiohttp
+from urllib.parse import urljoin
+from bs4 import BeautifulSoup
 with open('knowledge_base.json', 'r', encoding='utf-8') as f:
     knowledge_base = json.load(f)
 
@@ -23,10 +25,41 @@ ban_duration = timedelta(minutes=ban_minutes) if ban_minutes > 0 else None
 # Ollama клиент
 ollama = Client(host='http://localhost:11434')
 OLLAMA_MODEL = "deepseek-r1:8b"  # или "mistral", "deepseek-llm" и т.д.
-
+TARGET_SITES = ["https://abiturient.ru"]  # Список сайтов для поиска
+MAX_PAGES_TO_SEARCH = 100  # Максимальное количество страниц для сканирования
 # Чтение запрещенных слов
 with open('./banword.txt', 'r', encoding='utf-8') as file:
     forbidden_words = [word.strip().lower() for word in file if word.strip()]
+
+
+async def search_on_site(query: str) -> str:
+    """Ищет информацию на целевом сайте и возвращает найденный текст"""
+    async with aiohttp.ClientSession() as session:
+        for site in TARGET_SITES:
+            try:
+                # Имитируем поиск по сайту (можно заменить на реальный поиск через API сайта)
+                async with session.get(site) as resp:
+                    if resp.status == 200:
+                        html = await resp.text()
+                        soup = BeautifulSoup(html, 'html.parser')
+                        
+                        # Ищем совпадения в тексте страницы
+                        found_texts = []
+                        for element in soup.find_all(['p', 'div', 'section']):
+                            text = element.get_text().strip()
+                            if query.lower() in text.lower():
+                                found_texts.append(text)
+                                if len(found_texts) >= MAX_PAGES_TO_SEARCH:
+                                    break
+                        
+                        if found_texts:
+                            return "\n\n".join(found_texts[:MAX_PAGES_TO_SEARCH])
+            except Exception as e:
+                print(f"Ошибка при поиске на сайте {site}: {e}")
+    return ""
+
+
+
 
 async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     """Проверяет, является ли пользователь админом группы."""
@@ -79,8 +112,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Если есть "?" и пользователь не админ — спрашиваем у LLM
     if "?" in message.text and not await is_admin(update, context):
-        llm_response = await ask_ollama(message.text)
-        await message.reply_text(f"Ответ от AI:\n{llm_response}")
+         site_content = await search_on_site(message.text)
+        
+        if site_content:
+            # 2. Если нашли на сайте — перефразируем через LLM
+            llm_response = await ask_ollama(
+                f"Перефразируй этот текст кратко, отвечая на вопрос: '{message.text}'\n\n"
+                f"Текст для перефразировки:\n{site_content[:3000]}\n\n"
+                "Ответ (только суть, без вступлений):"
+            )
+            await message.reply_text(f"🔍 Найдено на сайте:\n{llm_response}")
+        else:
+            # 3. Если на сайте не нашли — просто спрашиваем у LLM
+            llm_response = await ask_ollama(message.text)
+            await message.reply_text(f"Ответ от AI:\n{llm_response}")
+
 
 async def handle_ban(update: Update, context: ContextTypes.DEFAULT_TYPE, user, message):
     """Обработка бана/мута за запрещённые слова."""
