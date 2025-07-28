@@ -1,3 +1,5 @@
 .env
 github
 github.pub
+./env
+nohup.out
