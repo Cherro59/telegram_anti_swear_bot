@@ -8,6 +8,7 @@ import json
 import re 
 from ollama import Client  # Добавляем клиент Ollama
 import aiohttp
+from bs4 import BeautifulSoup
 with open('knowledge_base.json', 'r', encoding='utf-8') as f:
     knowledge_base = json.load(f)
 
@@ -30,12 +31,33 @@ SEARXNG_URL = os.getenv("SEARXNG_URL", "http://localhost:8181")  # Адрес в
 with open('./banword.txt', 'r', encoding='utf-8') as file:
     forbidden_words = [word.strip().lower() for word in file if word.strip()]
 
-async def searx_search(query: str) -> tuple[str, str]:
-    """Ищет информацию через SearxNG и возвращает (ответ, ссылку)"""
+
+async def fetch_full_text(session, url):
+    """Скачивает и чистит текст со страницы"""
     try:
-        # Правильное формирование запроса для поиска на конкретном сайте
+        async with session.get(url, timeout=10) as resp:
+            if resp.status == 200:
+                html = await resp.text()
+                soup = BeautifulSoup(html, 'html.parser')
+                
+                # Удалим скрипты/стили
+                for tag in soup(['script', 'style']):
+                    tag.decompose()
+                
+                text = soup.get_text(separator='\n')
+                clean_text = '\n'.join(line.strip() for line in text.splitlines() if line.strip())
+                return clean_text
+    except Exception as e:
+        print(f"Ошибка при загрузке контента {url}: {e}")
+    return ""
+
+
+
+async def searx_search(query: str) -> tuple[str, str]:
+    """Ищет информацию через SearxNG и парсит полную страницу"""
+    try:
         params = {
-            "q": f"site:abiturient.ru {query}",  # Ключевое изменение!
+            "q": f"site:abiturient.ru {query}",
             "format": "json",
             "language": "ru"
         }
@@ -43,29 +65,27 @@ async def searx_search(query: str) -> tuple[str, str]:
 
         async with aiohttp.ClientSession() as session:
             async with session.get(
-                f"{SEARXNG_URL}/search",
-                params=params,
-                headers=headers,
-                timeout=10  # Увеличил таймаут
+                f"{SEARXNG_URL}/search", params=params, headers=headers, timeout=10
             ) as resp:
                 if resp.status == 200:
                     data = await resp.json()
-                    print(f"Debug SearxNG results: {data}")  # Для отладки
-                    
-                    if data.get('results'):
-                        filtered_results = [
-                            r for r in data['results'] 
-                            if 'abiturient.ru' in r['url']
-                        ]
-                        
-                        if filtered_results:
-                            first_result = filtered_results[0]
-                            print(first_result)
-                            clean_url = first_result['url'].split('?')[0]
-                            return first_result['content'], clean_url
+                    print(f"SearxNG результаты: {data}")
+
+                    filtered_results = [
+                        r for r in data.get('results', []) if 'abiturient.ru' in r['url']
+                    ]
+                    if filtered_results:
+                        first = filtered_results[0]
+                        url = first['url'].split('?')[0]
+
+                        full_text = await fetch_full_text(session, url)
+                        return full_text, url
     except Exception as e:
         print(f"Ошибка SearxNG: {e}")
     return "", ""
+
+
+
 
 
 async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -88,7 +108,7 @@ async def ask_ollama(question: str) -> str:
     try:
         response = ollama.generate(
             model=OLLAMA_MODEL,
-            prompt=f"Ответь студенту, не выдумывай, говори только по известным данным и не выдавай что ты ИИ, просто выдай ответ,если не знаешь что сказать просто скажи, что ответ по следуюзей ссылке, ссылки писать не надо ее будет им видно, не говори что ты чего то не знаешь, если не знаешь просто скажи 'Обратите внимание на данную информацию' : {question}",
+            prompt=f"Ответь студенту, не выдумывай, говори только по известным данным и не выдавай что ты ИИ, просто выдай ответ,если не знаешь что сказать просто скажи, что ответ по следующей ссылке, ссылки писать не надо ее будет им видно, не говори что ты чего то не знаешь: {question}",
             stream=False
         )
         return response['response']
