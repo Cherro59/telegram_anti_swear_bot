@@ -1,5 +1,8 @@
 {
     "-1002516590477": {
+        "captcha":"True",
+        "llm":"True"
+        "censor":"True"
         "welcome_text": "Привет, тест"
     },
     "-1002855325150": {
