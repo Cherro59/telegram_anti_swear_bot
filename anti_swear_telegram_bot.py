@@ -1,7 +1,7 @@
 import json
 import os
 from datetime import datetime, timedelta
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, MessageHandler, filters, ContextTypes,CommandHandler,CallbackQueryHandler
 from telegram import ChatPermissions
 from dotenv import load_dotenv
@@ -116,14 +116,26 @@ def generate_captcha():
 async def send_captcha(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = str(update.effective_chat.id)
     new_member = update.message.new_chat_members[0]
-    
-    # Проверяем, есть ли приветствие для этого чата
-    if chat_id in WELCOME_MESSAGES:
-        welcome_data = WELCOME_MESSAGES[chat_id]
+    user_id = update.effective_user.id
+    permissions = ChatPermissions(
+                    can_send_messages=False,  
+                    can_send_polls=False,
+                    can_send_other_messages=False,
+                    can_add_web_page_previews=False,
+                    can_change_info=False,
+                    can_invite_users=False,
+                    can_pin_messages=False,
+                )
+    await context.bot.restrict_chat_member(
+                    chat_id=chat_id,
+                    user_id=user_id,
+                    permissions=permissions,
+        )
+    if chat_id in welcome_messages:
+        welcome_data = welcome_messages[chat_id]
         welcome_text = (
-            f"👋 {new_member.mention_html()}, {welcome_data['welcome_text']}\n\n"
-            f"📜 {welcome_data['rules']}\n\n"
-            "⚠️ **Решите капчу для доступа:**"
+            f" {new_member.mention_html()}, {welcome_data['welcome_text']}\n\n"
+            " **Решите капчу для доступа:**"
         )
     else:
         welcome_text = f"{new_member.mention_html()}, добро пожаловать! Решите капчу:"
@@ -152,17 +164,31 @@ async def handle_captcha_response(update: Update, context: ContextTypes.DEFAULT_
     query = update.callback_query
     user_id = query.from_user.id
     user_answer = query.data
-    
+    chat_id = query.message.chat_id   
     if user_id in captcha_storage and user_answer == captcha_storage[user_id]:
         await query.answer("Верно! Доступ разрешён.")
-        await query.edit_message_text("Проверка пройдена успешно!")
+        await query.delete_message()
         del captcha_storage[user_id]
+        permissions = ChatPermissions(
+    can_send_messages=True,          
+    can_send_polls=False,           
+    can_send_other_messages=True, 
+    can_add_web_page_previews=False, 
+    can_change_info=False,           
+    can_invite_users=False,         
+    can_pin_messages=False,        
+)
+        await context.bot.restrict_chat_member(
+                    chat_id=chat_id,
+                    user_id=user_id,
+                    permissions=permissions,
+        )
     else:
         await query.answer("Неверно! Попробуйте ещё раз.")
 def main():
     application = Application.builder().token(bot_token).build()
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    if captcha == true : 
+    if captcha == True : 
         application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, send_captcha))
         application.add_handler(CallbackQueryHandler(handle_captcha_response))
     application.run_polling()
