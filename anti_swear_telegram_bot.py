@@ -162,7 +162,7 @@ async def handle_captcha_response(update: Update, context: ContextTypes.DEFAULT_
 def main():
     application = Application.builder().token(bot_token).build()
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    if CAPTCHA == true : 
+    if captcha == true : 
         application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, send_captcha))
         application.add_handler(CallbackQueryHandler(handle_captcha_response))
     application.run_polling()
