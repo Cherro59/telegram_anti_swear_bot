@@ -1,22 +1,28 @@
+import json
 import os
 from datetime import datetime, timedelta
 from telegram import Update
-from telegram.ext import Application, MessageHandler, filters, ContextTypes
+from telegram.ext import Application, MessageHandler, filters, ContextTypes,CommandHandler,CallbackQueryHandler
 from telegram import ChatPermissions
 from dotenv import load_dotenv
-
+import random
 load_dotenv()
 
 # Конфигурация
 bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
 banning = os.getenv("BANNING", "False").lower() == "true"
+captcha = os.getenv("CAPTCHA", "False").lower() == "true"
 ban_minutes = int(os.getenv("BAN_DURATION", 0))
 timezone = timedelta(hours=(int(os.getenv("TIMEZONE", 0))))
 ban_duration = timedelta(minutes=ban_minutes) if ban_minutes > 0 else None
+captcha_storage = {}
 
-# Чтение запрещенных слов
+# Чтение  слов и приветсвенных сообщений
 with open('./banword.txt', 'r', encoding='utf-8') as file:
     forbidden_words = [word.strip().lower() for word in file if word.strip()]
+
+with open("welcome_messages.json", "r", encoding="utf-8") as f:
+    welcome_messages = json.load(f)
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     #if not update.message or not update.message.text:
@@ -27,9 +33,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = message.from_user
     message_text = message.text.lower()
-    #user = update.message.from_user
 
-    #message_text = update.message.text.lower()
     print(message_text) 
    
     if any(word in message_text.split() for word in forbidden_words):
@@ -71,7 +75,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 restrict_duration = ban_duration
                 until_date = datetime.now() + restrict_duration - timezone
                 
-                # Применяем ограничение
                 await context.bot.restrict_chat_member(
                     chat_id=message.chat_id,
                     user_id=user.id,
@@ -79,8 +82,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     until_date=until_date
                 )
                 
-                # Отправляем уведомление
-
                 warning = (
                     f"⚠️ Пользователь {user.first_name} "
                     f"ограничен в отправке сообщений на {duration} "
@@ -94,9 +95,76 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as error:
             print(f'Ошибка: {error}')
 
+def generate_captcha():
+    a = random.randint(1, 10)
+    b = random.randint(1, 10)
+    operation = random.choice(["+", "-", "*"])
+    
+    if operation == "+":
+        answer = a + b
+    elif operation == "-":
+        answer = a - b
+    else:
+        answer = a * b
+    
+    question = f"Решите капчу: {a} {operation} {b} = ?"
+    wrong_answers = [answer + random.randint(1, 3), answer - random.randint(1, 3)]
+    options = [answer] + wrong_answers
+    random.shuffle(options)
+    return question, options, str(answer)
+
+async def send_captcha(update: Update, context: ContextTypes.DEFAULT_TYPE):
+     chat_id = str(update.effective_chat.id)
+    new_member = update.message.new_chat_members[0]
+    
+    # Проверяем, есть ли приветствие для этого чата
+    if chat_id in WELCOME_MESSAGES:
+        welcome_data = WELCOME_MESSAGES[chat_id]
+        welcome_text = (
+            f"👋 {new_member.mention_html()}, {welcome_data['welcome_text']}\n\n"
+            f"📜 {welcome_data['rules']}\n\n"
+            "⚠️ **Решите капчу для доступа:**"
+        )
+    else:
+        welcome_text = f"👋 {new_member.mention_html()}, добро пожаловать! Решите капчу:"
+    
+    # Генерируем капчу
+    question, options, correct_answer = generate_captcha()
+    captcha_storage[new_member.id] = correct_answer
+    
+    # Создаём кнопки с вариантами
+    keyboard = [
+        [InlineKeyboardButton(str(option), callback_data=str(option))]
+        for option in options
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    # Отправляем сообщение
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=f"{welcome_text}\n\n{question}",
+        reply_markup=reply_markup,
+        parse_mode="HTML",
+    )
+
+    
+async def handle_captcha_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user_id = query.from_user.id
+    user_answer = query.data
+    
+    if user_id in captcha_storage and user_answer == captcha_storage[user_id]:
+        await query.answer("Верно! Доступ разрешён.")
+        await query.edit_message_text("Проверка пройдена успешно!")
+        del captcha_storage[user_id]
+    else:
+        await query.answer("Неверно! Попробуйте ещё раз.")
 def main():
     application = Application.builder().token(bot_token).build()
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    if CAPTCHA == true : 
+        application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, send_captcha))
+        application.add_handler(CallbackQueryHandler(handle_captcha_response))
     application.run_polling()
 
 if __name__ == '__main__':
