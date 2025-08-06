@@ -6,6 +6,14 @@ from telegram.ext import Application, MessageHandler, filters, ContextTypes,Comm
 from telegram import ChatPermissions
 from dotenv import load_dotenv
 import random
+import re
+from ollama import Client  # Добавляем клиент Ollama
+import aiohttp
+from bs4 import BeautifulSoup
+with open('knowledge_base.json', 'r', encoding='utf-8') as f:
+    knowledge_base = json.load(f)
+
+
 load_dotenv()
 
 # Конфигурация
@@ -21,8 +29,95 @@ captcha_storage = {}
 with open('./banword.txt', 'r', encoding='utf-8') as file:
     forbidden_words = [word.strip().lower() for word in file if word.strip()]
 
-with open("welcome_messages.json", "r", encoding="utf-8") as f:
-    welcome_messages = json.load(f)
+with open("channels.json", "r", encoding="utf-8") as f:
+    channels = json.load(f)
+
+async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Проверяет, является ли пользователь админом группы."""
+    if not update.message or not update.message.chat:
+        return False
+
+    chat_id = update.message.chat.id
+    user_id = update.message.from_user.id
+
+    try:
+        admins = await context.bot.get_chat_administrators(chat_id)
+        return any(admin.user.id == user_id for admin in admins)
+    except Exception as e:
+        print(f"Ошибка проверки админки: {e}")
+        return False
+
+
+
+async def searx_search(query: str) -> tuple[str, str]:
+    """Ищет информацию через SearxNG и парсит полную страницу"""
+    try:
+        params = {
+            "q": f"site:abiturient.ru {query}",
+            "format": "json",
+            "language": "ru"
+        }
+        headers = {"Accept": "application/json"}
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"{SEARXNG_URL}/search", params=params, headers=headers, timeout=10
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    print(f"SearxNG результаты: {data}")
+
+                    filtered_results = [
+                        r for r in data.get('results', []) if 'abiturient.ru' in r['url']
+                    ]
+                    if filtered_results:
+                        first = filtered_results[0]
+                        url = first['url'].split('?')[0]
+
+                        full_text = await fetch_full_text(session, url)
+                        return full_text, url
+    except Exception as e:
+        print(f"Ошибка SearxNG: {e}")
+    return "", ""
+
+
+
+async def fetch_full_text(session, url):
+    """Скачивает и чистит текст со страницы"""
+    try:
+        async with session.get(url, timeout=10) as resp:
+            if resp.status == 200:
+                html = await resp.text()
+                soup = BeautifulSoup(html, 'html.parser')
+
+                # Удалим скрипты/стили
+                for tag in soup(['script', 'style']):
+                    tag.decompose()
+
+                text = soup.get_text(separator='\n')
+                clean_text = '\n'.join(line.strip() for line in text.splitlines() if line.strip())
+                return clean_text
+    except Exception as e:
+        print(f"Ошибка при загрузке контента {url}: {e}")
+    return ""
+
+
+async def ask_ollama(question: str) -> str:
+    """Запрашивает ответ у локальной LLM через Ollama."""
+    try:
+        response = ollama.generate(
+            model=OLLAMA_MODEL,
+            prompt=f"Ответь студенту, не выдумывай, говори только по известным данным и не выдавай что ты ИИ, просто выдай ответ,если не знаешь что сказать просто скажи, что ответ по следующей ссылке, ссылки писать не надо ее будет им видно, не говори что ты чего то не знаешь: {question}",
+            stream=False
+        )
+        return response['response']
+    except Exception as e:
+        print(f"Ошибка Ollama: {e}")
+        return "Извините, не могу обработать запрос."
+
+
+
+
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     #if not update.message or not update.message.text:
@@ -33,10 +128,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = message.from_user
     message_text = message.text.lower()
-
-    print(message_text) 
+    chat_id - message.chat_id
    
-    if any(word in message_text.split() for word in forbidden_words):
+    if  channels[chat_id]["censor"] == True and  any(word in message_text.split() for word in forbidden_words):
         try:
             await message.delete()
             if  not ban_duration: return 
@@ -91,6 +185,33 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     text=warning
                 )
 
+        if  channels[chat_id]["llm"] == True and  "?" in message.text and not await is_admin(update, context):
+        
+            search_result, source_url = await searx_search(message.text)
+
+        if search_result:
+            # 2. Перефразирование через Ollama
+            answer = await ask_ollama(
+                f"Дай краткий ответ на вопрос '{message.text}' "
+                f"на основе этого текста:\n{search_result[:2000]}"
+            )
+
+            # Формируем сообщение с ссылкой
+            response_text = f"🔍 Ответ:\n{answer}\n\n"
+            if source_url:
+                response_text += f"_[Источник]({source_url})_"
+
+            await message.reply_text(
+                response_text,
+               # parse_mode="Markdown",
+                disable_web_page_preview=True
+            )
+        else:
+            # 3. Если поиск не дал результатов
+            #llm_response = await ask_ollama(message.text)
+
+            #await message.reply_text(f"💡 Ответ:\n{llm_response}")    
+            pass
 
         except Exception as error:
             print(f'Ошибка: {error}')
@@ -115,6 +236,9 @@ def generate_captcha():
 
 async def send_captcha(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = str(update.effective_chat.id)
+    if channels[chat_id]["captcha"] != True: # проверка нужна ли в канале каптча
+        return
+
     new_member = update.message.new_chat_members[0]
     user_id = update.effective_user.id
     permissions = ChatPermissions(
@@ -131,8 +255,8 @@ async def send_captcha(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     user_id=user_id,
                     permissions=permissions,
         )
-    if chat_id in welcome_messages:
-        welcome_data = welcome_messages[chat_id]
+    if chat_id in channels:
+        welcome_data = channels[chat_id]
         welcome_text = (
             f" {new_member.mention_html()}, {welcome_data['welcome_text']}\n\n"
             " **Решите капчу для доступа:**"
@@ -188,9 +312,8 @@ async def handle_captcha_response(update: Update, context: ContextTypes.DEFAULT_
 def main():
     application = Application.builder().token(bot_token).build()
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    if captcha == True : 
-        application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, send_captcha))
-        application.add_handler(CallbackQueryHandler(handle_captcha_response))
+    application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, send_captcha))
+    application.add_handler(CallbackQueryHandler(handle_captcha_response))
     application.run_polling()
 
 if __name__ == '__main__':
