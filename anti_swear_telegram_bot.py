@@ -114,7 +114,7 @@ def generate_captcha():
     return question, options, str(answer)
 
 async def send_captcha(update: Update, context: ContextTypes.DEFAULT_TYPE):
-     chat_id = str(update.effective_chat.id)
+    chat_id = str(update.effective_chat.id)
     new_member = update.message.new_chat_members[0]
     
     # Проверяем, есть ли приветствие для этого чата
@@ -126,7 +126,7 @@ async def send_captcha(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "⚠️ **Решите капчу для доступа:**"
         )
     else:
-        welcome_text = f"👋 {new_member.mention_html()}, добро пожаловать! Решите капчу:"
+        welcome_text = f"{new_member.mention_html()}, добро пожаловать! Решите капчу:"
     
     # Генерируем капчу
     question, options, correct_answer = generate_captcha()
