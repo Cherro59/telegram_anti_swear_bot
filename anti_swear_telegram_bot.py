@@ -20,10 +20,17 @@ load_dotenv()
 bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
 banning = os.getenv("BANNING", "False").lower() == "true"
 captcha = os.getenv("CAPTCHA", "False").lower() == "true"
-ban_minutes = int(os.getenv("BAN_DURATION", 0))
 timezone = timedelta(hours=(int(os.getenv("TIMEZONE", 0))))
-ban_duration = timedelta(minutes=ban_minutes) if ban_minutes > 0 else None
 captcha_storage = {}
+
+ollama = Client(host='http://localhost:11434')
+OLLAMA_MODEL = "llama3.1:8b"  # или "mistral", "deepseek-llm" и т.д.
+TARGET_SITES = ["https://abiturient.ru"]  # Список сайтов для поиска
+MAX_PAGES_TO_SEARCH = 100000  # Максимальное количество страниц для сканирования
+SEARXNG_URL = os.getenv("SEARXNG_URL", "http://localhost:8181")  # Адрес вашего SearxNG
+
+
+
 
 # Чтение  слов и приветсвенных сообщений
 with open('./banword.txt', 'r', encoding='utf-8') as file:
@@ -128,66 +135,70 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = message.from_user
     message_text = message.text.lower()
-    chat_id - message.chat_id
-   
-    if  channels[chat_id]["censor"] == True and  any(word in message_text.split() for word in forbidden_words):
+    chat_id = str(message.chat_id)
+    try:
+        censor = channels[chat_id]["censor"]
+    except:
+        censor = "True"
+    if censor == "True" and  any(word in message_text.split() for word in forbidden_words):
         try:
             await message.delete()
-            if  not ban_duration: return 
+            try:
+                ban_minutes = int(channels[chat_id]["ban_duration"])
+                ban_duration = timedelta(minutes=ban_minutes)
+                print(ban_duration)
+            except:
+                pass
+            if  not ban_duration: return # в теории логчно что сообщение мы удалили и раз не баним то нечего с сообщением че то делать 
             
-            if ban_minutes >= 60:
+            if  ban_minutes>= 60:
                 hours = ban_minutes // 60
                 mins = ban_minutes % 60
                 duration = f"{hours} час{'а' if 2 <= hours % 10 <= 4 and (hours % 100 < 10 or hours % 100 > 20) else 'ов'}" + (f" {mins} мин" if mins else "")
             else:
                 duration = f"{ban_minutes} минут{'у' if ban_minutes == 1 else ('ы' if 2 <= ban_minutes % 10 <= 4 and (ban_minutes % 100 < 10 or ban_minutes % 100 > 20) else '')}"
 
-            if banning:
-                until_date = datetime.now() + ban_duration - timezone
-                
-
-                await context.bot.ban_chat_member(
-                    chat_id=message.chat_id,
-                    user_id=user.id,
-                    until_date=until_date
-                )
-                warning = f" Пользователь {user.first_name} забанен на {duration}!"
-                await context.bot.send_message(
-                    chat_id=message.chat_id,
-                    text=warning
-                )
-            else:    
-                permissions = ChatPermissions(
-                    can_send_messages=False,  
-                    can_send_polls=False,
-                    can_send_other_messages=False,
-                    can_add_web_page_previews=False,
-                    can_change_info=False,
-                    can_invite_users=False,
-                    can_pin_messages=False,
-                )
-                restrict_duration = ban_duration
-                until_date = datetime.now() + restrict_duration - timezone
-                
-                await context.bot.restrict_chat_member(
-                    chat_id=message.chat_id,
-                    user_id=user.id,
-                    permissions=permissions,
-                    until_date=until_date
-                )
-                
-                warning = (
-                    f"⚠️ Пользователь {user.first_name} "
-                    f"ограничен в отправке сообщений на {duration} "
-                )
-                await context.bot.send_message(
-                    chat_id=message.chat_id,
-                    text=warning
-                )
-
-        if  channels[chat_id]["llm"] == True and  "?" in message.text and not await is_admin(update, context):
+            permissions = ChatPermissions(
+                can_send_messages=False,  
+                can_send_polls=False,
+                can_send_other_messages=False,
+                can_add_web_page_previews=False,
+                can_change_info=False,
+                can_invite_users=False,
+                can_pin_messages=False,
+            )
+            restrict_duration = ban_duration
+            until_date = datetime.now() + restrict_duration - timezone
+            
+            await context.bot.restrict_chat_member(
+                chat_id=message.chat_id,
+                user_id=user.id,
+                permissions=permissions,
+                until_date=until_date
+            )
+            
+            warning = (
+                f"⚠️ Пользователь {user.first_name} "
+                f"ограничен в отправке сообщений на {duration} "
+            )
+            await context.bot.send_message(
+                chat_id=message.chat_id,
+                text=warning
+            )
+        except Exception as error:
+            print(f'Ошибка: {error}')
         
-            search_result, source_url = await searx_search(message.text)
+
+    try:
+        
+        llm = channels[chat_id]["llm"]
+        print(channels[chat_id]["llm"])
+    except:
+        llm = "False"
+
+
+    if llm == "True" and  "?" in message.text and not await is_admin(update, context):
+        search_result, source_url = await searx_search(message.text)
 
         if search_result:
             # 2. Перефразирование через Ollama
@@ -213,8 +224,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             #await message.reply_text(f"💡 Ответ:\n{llm_response}")    
             pass
 
-        except Exception as error:
-            print(f'Ошибка: {error}')
 
 def generate_captcha():
     a = random.randint(1, 10)
@@ -236,7 +245,11 @@ def generate_captcha():
 
 async def send_captcha(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = str(update.effective_chat.id)
-    if channels[chat_id]["captcha"] != True: # проверка нужна ли в канале каптча
+    try:
+        captcha = (channels[chat_id]['captcha'])
+    except:
+        captcha = "True"
+    if channels[chat_id]["captcha"] != "True": # проверка нужна ли в канале каптча
         return
 
     new_member = update.message.new_chat_members[0]

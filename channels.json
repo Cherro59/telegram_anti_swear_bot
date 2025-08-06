@@ -1,8 +1,9 @@
 {
     "-1002516590477": {
-        "captcha":"True",
-        "llm":"True"
-        "censor":"True"
+        "captcha":"False",
+        "llm":"True",
+        "censor":"True",
+        "ban_duration":"",
         "welcome_text": "Привет, тест"
     },
     "-1002855325150": {
