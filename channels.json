@@ -1,9 +1,0 @@
-{
-    "-1001904869149": {
-        "captcha":"False",
-        "llm":"True",
-        "censor":"True",
-        "ban_duration":"",
-        "welcome_text": "Привет, дорогой абитуриент..."
-    }
-}
