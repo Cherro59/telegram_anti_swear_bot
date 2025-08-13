@@ -135,8 +135,11 @@ async def open_settings_panel(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def settings_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in pending_input:
+        return
     query = update.callback_query
-
+    
     await query.answer()
 
     action, chat_id, key, owner_id = query.data.split("|")
@@ -294,7 +297,7 @@ async def send_captcha(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     if welcome_data:
         welcome_text = (
-            f" {new_member.mention_html()}, {welcome_data['welcome_text']}\n\n"
+            f" {new_member.mention_html()}, {welcome_data}\n\n"
             " **Решите капчу для доступа:**"
         )
     else:
@@ -310,6 +313,7 @@ async def send_captcha(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for option in options
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
+    print(reply_markup)
     
     # Отправляем сообщение
     await context.bot.send_message(
@@ -322,14 +326,16 @@ async def send_captcha(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
 async def handle_captcha_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    if not query.data.startswith("captcha:"):
+    if  not "captcha" in  query.data:
+        print(1)
         return  # смотрим что кнопка реально от капчи а не от настроек канала
     user_id = query.from_user.id
     user_answer = query.data
-    chat_id = query.message.chat_id   
-    if user_id in captcha_storage and user_answer == captcha_storage[user_id]:
-        #await query.answer("Верно! Доступ разрешён.")
-        #await query.delete_message()
+    chat_id = query.message.chat_id  
+    print(captcha_storage)
+    if user_id in captcha_storage and  captcha_storage[user_id] in user_answer:
+        await query.answer("Верно! Доступ разрешён.")
+        await query.delete_message()
         del captcha_storage[user_id]
         permissions = ChatPermissions(
     can_send_messages=True,          
@@ -458,15 +464,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
          
 def main():
     application = Application.builder().token(bot_token).build()
+    application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, send_captcha))
+    application.add_handler(CallbackQueryHandler(handle_captcha_response))
+    application.add_handler(CallbackQueryHandler(handle_captcha_response, pattern=r"^captcha:"))
     application.add_handler(CallbackQueryHandler(settings_button_handler, pattern=r"^settings\|"))
     application.add_handler(CallbackQueryHandler(settings_button_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, settings_text_handler),
     group=0)
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message),
     group=1)
-    #application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, send_captcha))
-    #application.add_handler(CallbackQueryHandler(handle_captcha_response))
-    application.add_handler(CallbackQueryHandler(handle_captcha_response, pattern=r"^captcha:"))
     application.run_polling()
 
 if __name__ == '__main__':
