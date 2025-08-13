@@ -118,7 +118,6 @@ async def open_settings_panel(update: Update, context: ContextTypes.DEFAULT_TYPE
     """Открывает панель настроек, если тегнул админ."""
     chat_id = update.effective_chat.id
     user_id = update.effective_user.id
-
     print(channels)
     if str(chat_id) not in channels:
         captcha,welcome_data,censor,llm,ban_minutes = get_chat_settings(chat_id)
@@ -136,12 +135,10 @@ async def open_settings_panel(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def settings_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if user_id not in pending_input:
-        return
     query = update.callback_query
     
     await query.answer()
-
+    
     action, chat_id, key, owner_id = query.data.split("|")
     chat_id = str(chat_id)
     print(pending_input)
@@ -328,7 +325,7 @@ async def handle_captcha_response(update: Update, context: ContextTypes.DEFAULT_
     query = update.callback_query
     if  not "captcha" in  query.data:
         print(1)
-        return  # смотрим что кнопка реально от капчи а не от настроек канала
+        return False  # смотрим что кнопка реально от капчи а не от настроек канала
     user_id = query.from_user.id
     user_answer = query.data
     chat_id = query.message.chat_id  
@@ -375,12 +372,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if censor == True and  any(word in message_text.split() for word in forbidden_words):
         try:
             await message.delete()
+            ban_minutes = int(ban_minutes)
             if ban_minutes:
 
                 try:
 
             #    ban_minutes = int(channels[chat_id]["ban_duration"])
-                    ban_duration = timedelta(minutes=int(ban_minutes))
+                    ban_duration = timedelta(minutes=(ban_minutes))
                 #print(ban_duration)
                 except:
                     pass
@@ -465,9 +463,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     application = Application.builder().token(bot_token).build()
     application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, send_captcha))
-    application.add_handler(CallbackQueryHandler(handle_captcha_response))
+    #application.add_handler(CallbackQueryHandler(handle_captcha_response))
     application.add_handler(CallbackQueryHandler(handle_captcha_response, pattern=r"^captcha:"))
-    application.add_handler(CallbackQueryHandler(settings_button_handler, pattern=r"^settings\|"))
+   # application.add_handler(CallbackQueryHandler(settings_button_handler, pattern=r"^settings\|"))
     application.add_handler(CallbackQueryHandler(settings_button_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, settings_text_handler),
     group=0)
