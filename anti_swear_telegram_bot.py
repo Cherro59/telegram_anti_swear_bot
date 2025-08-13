@@ -22,14 +22,13 @@ banning = os.getenv("BANNING", "False").lower() == "true"
 captcha = os.getenv("CAPTCHA", "False").lower() == "true"
 timezone = timedelta(hours=(int(os.getenv("TIMEZONE", 0))))
 captcha_storage = {}
+pending_input = {}
 
 ollama = Client(host='http://localhost:11434')
 OLLAMA_MODEL = "llama3.1:8b"  # или "mistral", "deepseek-llm" и т.д.
 TARGET_SITES = ["https://abiturient.ru"]  # Список сайтов для поиска
 MAX_PAGES_TO_SEARCH = 100000  # Максимальное количество страниц для сканирования
 SEARXNG_URL = os.getenv("SEARXNG_URL", "http://localhost:8181")  # Адрес вашего SearxNG
-
-
 
 
 # Чтение  слов и приветсвенных сообщений
@@ -39,6 +38,8 @@ with open('./banword.txt', 'r', encoding='utf-8') as file:
 with open("channels.json", "r", encoding="utf-8") as f:
     channels = json.load(f)
 
+
+# Иные функцйии
 async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     """Проверяет, является ли пользователь админом группы."""
     if not update.message or not update.message.chat:
@@ -54,7 +55,131 @@ async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
         print(f"Ошибка проверки админки: {e}")
         return False
 
+def get_chat_settings(chat_id):
+    try:
+        captcha = (channels[chat_id]['captcha'])
+    except:
+        captcha = True
 
+    try:
+        welcome_text = (channels[chat_id]['welcome_text'])
+    except:
+        welcome_text = ""
+
+    try:
+        censor = (channels[chat_id]['censor'])
+    except:
+        censor = True
+
+    try:
+        llm = (channels[chat_id]['llm'])
+    except:
+        llm = False
+
+    try:
+        ban_duration = (channels[chat_id]['ban_duration'])
+    except:
+        ban_duration = ""
+    return captcha,welcome_text,censor,llm,ban_duration
+
+
+def save_channels():
+    with open("channels.json", "w", encoding="utf-8") as f:
+        json.dump(channels, f, indent=4, ensure_ascii=False)
+        print("saved")
+
+
+
+def build_keyboard(chat_id, owner_id):
+    ch = channels.get(str(chat_id), {})
+    buttons = []
+    for key, value in ch.items():
+        if isinstance(value, bool):
+            label = f"{key}: {'✅' if value else '❌'}"
+            callback = f"toggle|{chat_id}|{key}|{owner_id}"
+        elif isinstance(value, (int, float)):
+            label = f"{key}: {value}"
+            callback = f"edit_num|{chat_id}|{key}|{owner_id}"
+        elif isinstance(value, str):
+            short = value if len(value) <= 10 else value[:10] + "..."
+            label = f"{key}: {short}"
+            callback = f"edit_text|{chat_id}|{key}|{owner_id}"
+        else:
+            label = f"{key}: {value}"
+            callback = f"edit_text|{chat_id}|{key}|{owner_id}"
+
+        buttons.append([InlineKeyboardButton(label, callback_data=callback)])
+
+    return InlineKeyboardMarkup(buttons)
+
+
+
+async def open_settings_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Открывает панель настроек, если тегнул админ."""
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
+
+    print(channels)
+    if str(chat_id) not in channels:
+        captcha,welcome_data,censor,llm,ban_minutes = get_chat_settings(chat_id)
+        print(captcha,welcome_data,censor,llm,ban_minutes)
+        channels[str(chat_id)] ={'captcha': captcha, 'llm': llm, 'censor': censor, 'ban_duration': ban_minutes, 'welcome_text': welcome_data}
+        save_channels()
+
+    await update.message.reply_text(
+        f"Настройки канала (доступ только {update.effective_user.first_name}):",
+        reply_markup=build_keyboard(chat_id, user_id)
+    )
+
+
+
+
+async def settings_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+
+    await query.answer()
+
+    action, chat_id, key, owner_id = query.data.split("|")
+    chat_id = str(chat_id)
+    print(pending_input)
+    if str(query.from_user.id) != owner_id:
+        await query.answer("⛔ Это не ваша панель!", show_alert=True)
+        return
+    if action == "toggle":
+        channels[chat_id][key] = not channels[chat_id][key]
+        save_channels()
+        await query.edit_message_reply_markup(reply_markup=build_keyboard(chat_id,owner_id))
+
+    elif action == "edit_text":
+        pending_input[query.from_user.id] = (chat_id, key, "text")
+        await query.message.reply_text(f"Введите новый текст для {key}:")
+
+    elif action == "edit_num":
+        pending_input[query.from_user.id] = (chat_id, key, "num")
+        await query.message.reply_text(f"Введите новое число для {key}:")
+
+async def settings_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in pending_input:
+        return  # не наш пользователь, ничего не делаем
+    if user_id in pending_input:
+        chat_id, key, mode = pending_input.pop(user_id)
+
+        if mode == "text":
+            channels[chat_id][key] = update.message.text
+        elif mode == "num":
+            try:
+                channels[chat_id][key] = int(update.message.text)
+            except ValueError:
+                await update.message.reply_text("Ошибка: нужно ввести число.")
+                return
+
+        save_channels()
+        await update.message.reply_text("✅ Настройка сохранена.",
+                                        reply_markup=build_keyboard(chat_id,user_id))
+
+
+# Работа LLM
 
 async def searx_search(query: str) -> tuple[str, str]:
     """Ищет информацию через SearxNG и парсит полную страницу"""
@@ -122,9 +247,109 @@ async def ask_ollama(question: str) -> str:
         print(f"Ошибка Ollama: {e}")
         return "Извините, не могу обработать запрос."
 
+# Каптча
+def generate_captcha():
+    a = random.randint(1, 10)
+    b = random.randint(1, 10)
+    operation = random.choice(["+", "-", "*"])
+    
+    if operation == "+":
+        answer = a + b
+    elif operation == "-":
+        answer = a - b
+    else:
+        answer = a * b
+    
+    question = f"Решите капчу: {a} {operation} {b} = ?"
+    wrong_answers = [answer + random.randint(1, 3), answer - random.randint(1, 3)]
+    options = [answer] + wrong_answers
+    random.shuffle(options)
+    return question, options, str(answer)
+
+async def send_captcha(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = str(update.effective_chat.id)
+    captcha,welcome_data,_,_,_ = get_chat_settings(chat_id)
+   # try:
+    #    captcha = (channels[chat_id]['captcha'])
+    #except:
+    #    captcha = "True"
+    if channels[chat_id]["captcha"] != True: # проверка нужна ли в канале каптча
+        return
+
+    new_member = update.message.new_chat_members[0]
+    user_id = update.effective_user.id
+    permissions = ChatPermissions(
+                    can_send_messages=False,  
+                    can_send_polls=False,
+                    can_send_other_messages=False,
+                    can_add_web_page_previews=False,
+                    can_change_info=False,
+                    can_invite_users=False,
+                    can_pin_messages=False,
+                )
+    await context.bot.restrict_chat_member(
+                    chat_id=chat_id,
+                    user_id=user_id,
+                    permissions=permissions,
+        )
+    if welcome_data:
+        welcome_text = (
+            f" {new_member.mention_html()}, {welcome_data['welcome_text']}\n\n"
+            " **Решите капчу для доступа:**"
+        )
+    else:
+        welcome_text = f"{new_member.mention_html()}, добро пожаловать! Решите капчу:"
+    
+    # Генерируем капчу
+    question, options, correct_answer = generate_captcha()
+    captcha_storage[new_member.id] = correct_answer
+    
+    # Создаём кнопки с вариантами
+    keyboard = [
+        [InlineKeyboardButton(str(option), callback_data=f"captcha:{option}")]
+        for option in options
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    # Отправляем сообщение
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=f"{welcome_text}\n\n{question}",
+        reply_markup=reply_markup,
+        parse_mode="HTML",
+    )
+
+    
+async def handle_captcha_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not query.data.startswith("captcha:"):
+        return  # смотрим что кнопка реально от капчи а не от настроек канала
+    user_id = query.from_user.id
+    user_answer = query.data
+    chat_id = query.message.chat_id   
+    if user_id in captcha_storage and user_answer == captcha_storage[user_id]:
+        #await query.answer("Верно! Доступ разрешён.")
+        #await query.delete_message()
+        del captcha_storage[user_id]
+        permissions = ChatPermissions(
+    can_send_messages=True,          
+    can_send_polls=False,           
+    can_send_other_messages=True, 
+    can_add_web_page_previews=False, 
+    can_change_info=False,           
+    can_invite_users=False,         
+    can_pin_messages=False,        
+)
+        await context.bot.restrict_chat_member(
+                    chat_id=chat_id,
+                    user_id=user_id,
+                    permissions=permissions,
+        )
+    else:
+        await query.answer("Неверно! Попробуйте ещё раз.")
 
 
-
+# Обработка сообщений
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     #if not update.message or not update.message.text:
@@ -136,19 +361,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = message.from_user
     message_text = message.text.lower()
     chat_id = str(message.chat_id)
-    try:
-        censor = channels[chat_id]["censor"]
-    except:
-        censor = "True"
-    if censor == "True" and  any(word in message_text.split() for word in forbidden_words):
+    _,_,censor,llm,ban_minutes = get_chat_settings(chat_id)
+    #try:
+    #    censor = channels[chat_id]["censor"]
+    #except:
+    #    censor = "True"
+    if censor == True and  any(word in message_text.split() for word in forbidden_words):
         try:
             await message.delete()
-            try:
-                ban_minutes = int(channels[chat_id]["ban_duration"])
-                ban_duration = timedelta(minutes=ban_minutes)
-                print(ban_duration)
-            except:
-                pass
+            if ban_minutes:
+
+                try:
+
+            #    ban_minutes = int(channels[chat_id]["ban_duration"])
+                    ban_duration = timedelta(minutes=int(ban_minutes))
+                #print(ban_duration)
+                except:
+                    pass
             if  not ban_duration: return # в теории логчно что сообщение мы удалили и раз не баним то нечего с сообщением че то делать 
             
             if  ban_minutes>= 60:
@@ -189,144 +418,55 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             print(f'Ошибка: {error}')
         
 
-    try:
-        
-        llm = channels[chat_id]["llm"]
-        print(channels[chat_id]["llm"])
-    except:
-        llm = "False"
+    #try:
+    #    
+    #    llm = channels[chat_id]["llm"]
+    #    print(channels[chat_id]["llm"])
+    #except:
+    #    llm = "False"
 
 
-    if llm == "True" and  "?" in message.text and not await is_admin(update, context):
-        search_result, source_url = await searx_search(message.text)
+    for entity in message.entities:
+        if entity.type == "mention" and await is_admin(update,context):
+            await open_settings_panel(update,context)
+        if llm == True and entity.type == "mention" in message.entities and not await is_admin(update, context):
+                search_result, source_url = await searx_search(message.text)
 
-        if search_result:
-            # 2. Перефразирование через Ollama
-            answer = await ask_ollama(
-                f"Дай краткий ответ на вопрос '{message.text}' "
-                f"на основе этого текста:\n{search_result[:2000]}"
-            )
+                if search_result:
+                    # 2. Перефразирование через Ollama
+                    answer = await ask_ollama(
+                        f"Дай краткий ответ на вопрос '{message.text}' "
+                        f"на основе этого текста:\n{search_result[:2000]}"
+                    )
 
-            # Формируем сообщение с ссылкой
-            response_text = f"🔍 Ответ:\n{answer}\n\n"
-            if source_url:
-                response_text += f"_[Источник]({source_url})_"
+                    # Формируем сообщение с ссылкой
+                    response_text = f"🔍 Ответ:\n{answer}\n\n"
+                    if source_url:
+                        response_text += f"_[Источник]({source_url})_"
 
-            await message.reply_text(
-                response_text,
-               # parse_mode="Markdown",
-                disable_web_page_preview=True
-            )
-        else:
-            # 3. Если поиск не дал результатов
-            #llm_response = await ask_ollama(message.text)
+                    await message.reply_text(
+                        response_text,
+                       # parse_mode="Markdown",
+                        disable_web_page_preview=True
+                    )
+                else:
+                    # 3. Если поиск не дал результатов
+                    #llm_response = await ask_ollama(message.text)
 
-            #await message.reply_text(f"💡 Ответ:\n{llm_response}")    
-            pass
-
-
-def generate_captcha():
-    a = random.randint(1, 10)
-    b = random.randint(1, 10)
-    operation = random.choice(["+", "-", "*"])
-    
-    if operation == "+":
-        answer = a + b
-    elif operation == "-":
-        answer = a - b
-    else:
-        answer = a * b
-    
-    question = f"Решите капчу: {a} {operation} {b} = ?"
-    wrong_answers = [answer + random.randint(1, 3), answer - random.randint(1, 3)]
-    options = [answer] + wrong_answers
-    random.shuffle(options)
-    return question, options, str(answer)
-
-async def send_captcha(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = str(update.effective_chat.id)
-    try:
-        captcha = (channels[chat_id]['captcha'])
-    except:
-        captcha = "True"
-    if channels[chat_id]["captcha"] != "True": # проверка нужна ли в канале каптча
-        return
-
-    new_member = update.message.new_chat_members[0]
-    user_id = update.effective_user.id
-    permissions = ChatPermissions(
-                    can_send_messages=False,  
-                    can_send_polls=False,
-                    can_send_other_messages=False,
-                    can_add_web_page_previews=False,
-                    can_change_info=False,
-                    can_invite_users=False,
-                    can_pin_messages=False,
-                )
-    await context.bot.restrict_chat_member(
-                    chat_id=chat_id,
-                    user_id=user_id,
-                    permissions=permissions,
-        )
-    if chat_id in channels:
-        welcome_data = channels[chat_id]
-        welcome_text = (
-            f" {new_member.mention_html()}, {welcome_data['welcome_text']}\n\n"
-            " **Решите капчу для доступа:**"
-        )
-    else:
-        welcome_text = f"{new_member.mention_html()}, добро пожаловать! Решите капчу:"
-    
-    # Генерируем капчу
-    question, options, correct_answer = generate_captcha()
-    captcha_storage[new_member.id] = correct_answer
-    
-    # Создаём кнопки с вариантами
-    keyboard = [
-        [InlineKeyboardButton(str(option), callback_data=str(option))]
-        for option in options
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    # Отправляем сообщение
-    await context.bot.send_message(
-        chat_id=chat_id,
-        text=f"{welcome_text}\n\n{question}",
-        reply_markup=reply_markup,
-        parse_mode="HTML",
-    )
-
-    
-async def handle_captcha_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    user_id = query.from_user.id
-    user_answer = query.data
-    chat_id = query.message.chat_id   
-    if user_id in captcha_storage and user_answer == captcha_storage[user_id]:
-        await query.answer("Верно! Доступ разрешён.")
-        await query.delete_message()
-        del captcha_storage[user_id]
-        permissions = ChatPermissions(
-    can_send_messages=True,          
-    can_send_polls=False,           
-    can_send_other_messages=True, 
-    can_add_web_page_previews=False, 
-    can_change_info=False,           
-    can_invite_users=False,         
-    can_pin_messages=False,        
-)
-        await context.bot.restrict_chat_member(
-                    chat_id=chat_id,
-                    user_id=user_id,
-                    permissions=permissions,
-        )
-    else:
-        await query.answer("Неверно! Попробуйте ещё раз.")
+                    #await message.reply_text(f"💡 Ответ:\n{llm_response}")    
+                    pass
+         
 def main():
     application = Application.builder().token(bot_token).build()
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, send_captcha))
-    application.add_handler(CallbackQueryHandler(handle_captcha_response))
+    application.add_handler(CallbackQueryHandler(settings_button_handler, pattern=r"^settings\|"))
+    application.add_handler(CallbackQueryHandler(settings_button_handler))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, settings_text_handler),
+    group=0)
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message),
+    group=1)
+    #application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, send_captcha))
+    #application.add_handler(CallbackQueryHandler(handle_captcha_response))
+    application.add_handler(CallbackQueryHandler(handle_captcha_response, pattern=r"^captcha:"))
     application.run_polling()
 
 if __name__ == '__main__':
