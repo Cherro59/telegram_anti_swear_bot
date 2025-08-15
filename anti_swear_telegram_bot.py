@@ -433,7 +433,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for entity in message.entities:
         if entity.type == "mention" and await is_admin(update,context):
             await open_settings_panel(update,context)
-        if llm == True and entity.type == "mention" in message.entities and not await is_admin(update, context):
+        if llm == True and entity.type == "mention" and not await is_admin(update, context):
                 search_result, source_url = await searx_search(message.text)
 
                 if search_result:
