@@ -35,6 +35,9 @@ SEARXNG_URL = os.getenv("SEARXNG_URL", "http://localhost:8181")  # Адрес в
 with open('./banword.txt', 'r', encoding='utf-8') as file:
     forbidden_words = [word.strip().lower() for word in file if word.strip()]
 
+with open('./banphrases.txt', 'r', encoding='utf-8') as file:
+    forbidden_phrases = [word.strip().lower() for word in file if word.strip()]
+
 with open("channels.json", "r", encoding="utf-8") as f:
     channels = json.load(f)
 
@@ -357,7 +360,58 @@ async def handle_captcha_response(update: Update, context: ContextTypes.DEFAULT_
 # Обработка сообщений
 
 
-async mute_person()
+async mute_person(message):
+    try:
+        await message.delete()
+        ban_minutes = int(ban_minutes)
+        if ban_minutes:
+
+            try:
+
+        #    ban_minutes = int(channels[chat_id]["ban_duration"])
+                ban_duration = timedelta(minutes=(ban_minutes))
+            #print(ban_duration)
+            except:
+                pass
+        if  not ban_duration: return # в теории логчно что сообщение мы удалили и раз не баним то нечего с сообщением че то делать 
+        
+        if  ban_minutes>= 60:
+            hours = ban_minutes // 60
+            mins = ban_minutes % 60
+            duration = f"{hours} час{'а' if 2 <= hours % 10 <= 4 and (hours % 100 < 10 or hours % 100 > 20) else 'ов'}" + (f" {mins} мин" if mins else "")
+        else:
+            duration = f"{ban_minutes} минут{'у' if ban_minutes == 1 else ('ы' if 2 <= ban_minutes % 10 <= 4 and (ban_minutes % 100 < 10 or ban_minutes % 100 > 20) else '')}"
+
+        permissions = ChatPermissions(
+            can_send_messages=False,  
+            can_send_polls=False,
+            can_send_other_messages=False,
+            can_add_web_page_previews=False,
+            can_change_info=False,
+            can_invite_users=False,
+            can_pin_messages=False,
+        )
+        restrict_duration = ban_duration
+        until_date = datetime.now() + restrict_duration - timezone
+        
+        await context.bot.restrict_chat_member(
+            chat_id=message.chat_id,
+            user_id=user.id,
+            permissions=permissions,
+            until_date=until_date
+        )
+        
+        warning = (
+            f"⚠️ Пользователь {user.first_name} "
+            f"ограничен в отправке сообщений на {duration} "
+        )
+        await context.bot.send_message(
+            chat_id=message.chat_id,
+            text=warning
+        )
+    except Exception as error:
+        print(f'Ошибка: {error}')
+   
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     #if not update.message or not update.message.text:
@@ -374,59 +428,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     #    censor = channels[chat_id]["censor"]
     #except:
     #    censor = "True"
-   if censor == True and  any(word in message_text.split() for word in forbidden_words):
-        try:
-            await message.delete()
-            ban_minutes = int(ban_minutes)
-            if ban_minutes:
-
-                try:
-
-            #    ban_minutes = int(channels[chat_id]["ban_duration"])
-                    ban_duration = timedelta(minutes=(ban_minutes))
-                #print(ban_duration)
-                except:
-                    pass
-            if  not ban_duration: return # в теории логчно что сообщение мы удалили и раз не баним то нечего с сообщением че то делать 
-            
-            if  ban_minutes>= 60:
-                hours = ban_minutes // 60
-                mins = ban_minutes % 60
-                duration = f"{hours} час{'а' if 2 <= hours % 10 <= 4 and (hours % 100 < 10 or hours % 100 > 20) else 'ов'}" + (f" {mins} мин" if mins else "")
-            else:
-                duration = f"{ban_minutes} минут{'у' if ban_minutes == 1 else ('ы' if 2 <= ban_minutes % 10 <= 4 and (ban_minutes % 100 < 10 or ban_minutes % 100 > 20) else '')}"
-
-            permissions = ChatPermissions(
-                can_send_messages=False,  
-                can_send_polls=False,
-                can_send_other_messages=False,
-                can_add_web_page_previews=False,
-                can_change_info=False,
-                can_invite_users=False,
-                can_pin_messages=False,
-            )
-            restrict_duration = ban_duration
-            until_date = datetime.now() + restrict_duration - timezone
-            
-            await context.bot.restrict_chat_member(
-                chat_id=message.chat_id,
-                user_id=user.id,
-                permissions=permissions,
-                until_date=until_date
-            )
-            
-            warning = (
-                f"⚠️ Пользователь {user.first_name} "
-                f"ограничен в отправке сообщений на {duration} "
-            )
-            await context.bot.send_message(
-                chat_id=message.chat_id,
-                text=warning
-            )
-        except Exception as error:
-            print(f'Ошибка: {error}')
-        
-
+   if censor == True:
+       if any(word in message_text.split() for word in forbidden_words):
+           mute_person(message)
+       elif any(word in message_text.split() for word in forbidden_phrases):
+           mute_person(message)
     #try:
     #    
     #    llm = channels[chat_id]["llm"]
