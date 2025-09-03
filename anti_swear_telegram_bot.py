@@ -367,6 +367,7 @@ async def mute_person(user,message,context,ban_minutes):
             ban_minutes = int(ban_minutes)
         except:
             ban_minutes = 0
+            ban_duration = timedelta(minutes=0)
         if ban_minutes:
 
             try:
