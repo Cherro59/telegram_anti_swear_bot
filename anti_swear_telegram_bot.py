@@ -360,7 +360,7 @@ async def handle_captcha_response(update: Update, context: ContextTypes.DEFAULT_
 # Обработка сообщений
 
 
-async mute_person(message):
+async def mute_person(message):
     try:
         await message.delete()
         ban_minutes = int(ban_minutes)
@@ -428,11 +428,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     #    censor = channels[chat_id]["censor"]
     #except:
     #    censor = "True"
-   if censor == True:
-       if any(word in message_text.split() for word in forbidden_words):
-           mute_person(message)
-       elif any(word in message_text.split() for word in forbidden_phrases):
-           mute_person(message)
+    if censor == True:
+        if any(word in message_text.split() for word in forbidden_words):
+            await mute_person(message)
+        elif any(word in message_text.split() for word in forbidden_phrases):
+            await mute_person(message)
     #try:
     #    
     #    llm = channels[chat_id]["llm"]
