@@ -39,7 +39,7 @@ with open("channels.json", "r", encoding="utf-8") as f:
     channels = json.load(f)
 
 
-# Иные функцйии
+# Иные функции
 async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     """Проверяет, является ли пользователь админом группы."""
     if not update.message or not update.message.chat:
@@ -356,6 +356,9 @@ async def handle_captcha_response(update: Update, context: ContextTypes.DEFAULT_
 
 # Обработка сообщений
 
+
+async mute_person()
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     #if not update.message or not update.message.text:
     #    return
@@ -435,7 +438,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for entity in message.entities:
         if entity.type == "mention" and await is_admin(update,context):
             await open_settings_panel(update,context)
-        if llm == True and entity.type == "mention" in message.entities and not await is_admin(update, context):
+        if llm == True and entity.type == "mention" and not await is_admin(update, context):
                 search_result, source_url = await searx_search(message.text)
 
                 if search_result:
