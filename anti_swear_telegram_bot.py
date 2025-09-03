@@ -109,7 +109,7 @@ def build_keyboard(chat_id, owner_id):
             callback = f"edit_text|{chat_id}|{key}|{owner_id}"
 
         buttons.append([InlineKeyboardButton(label, callback_data=callback)])
-
+    buttons.append([InlineKeyboardButton("❌ Закрыть панель", callback_data=f"close|{chat_id}|{1}|{owner_id}")])
     return InlineKeyboardMarkup(buttons)
 
 
@@ -153,10 +153,11 @@ async def settings_button_handler(update: Update, context: ContextTypes.DEFAULT_
     elif action == "edit_text":
         pending_input[query.from_user.id] = (chat_id, key, "text")
         await query.message.reply_text(f"Введите новый текст для {key}:")
-
     elif action == "edit_num":
         pending_input[query.from_user.id] = (chat_id, key, "num")
         await query.message.reply_text(f"Введите новое число для {key}:")
+    elif action == "close":
+        await query.message.delete()  # удаляем сообщение с настройками
 
 async def settings_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -175,6 +176,7 @@ async def settings_text_handler(update: Update, context: ContextTypes.DEFAULT_TY
                 return
 
         save_channels()
+      
         await update.message.reply_text("✅ Настройка сохранена.",
                                         reply_markup=build_keyboard(chat_id,user_id))
 
@@ -369,7 +371,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     #    censor = channels[chat_id]["censor"]
     #except:
     #    censor = "True"
-    if censor == True and  any(word in message_text.split() for word in forbidden_words):
+   if censor == True and  any(word in message_text.split() for word in forbidden_words):
         try:
             await message.delete()
             ban_minutes = int(ban_minutes)
