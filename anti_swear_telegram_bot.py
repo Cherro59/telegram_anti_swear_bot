@@ -363,7 +363,10 @@ async def handle_captcha_response(update: Update, context: ContextTypes.DEFAULT_
 async def mute_person(user,message,context,ban_minutes):
     try:
         await message.delete()
-        ban_minutes = int(ban_minutes)
+        try:
+            ban_minutes = int(ban_minutes)
+        except:
+            ban_minutes = 0
         if ban_minutes:
 
             try:
