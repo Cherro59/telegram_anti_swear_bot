@@ -37,7 +37,7 @@ with open('./banword.txt', 'r', encoding='utf-8') as file:
 
 with open('./banphrases.txt', 'r', encoding='utf-8') as file:
     forbidden_phrases = [word.strip().lower() for word in file if word.strip()]
-
+    forbidden_phrases = [re.compile(rf"\b{re.escape(phrase)}\b", re.IGNORECASE) for phrase in forbidden_phrases] 
 with open("channels.json", "r", encoding="utf-8") as f:
     channels = json.load(f)
 
@@ -360,7 +360,7 @@ async def handle_captcha_response(update: Update, context: ContextTypes.DEFAULT_
 # Обработка сообщений
 
 
-async def mute_person(message):
+async def mute_person(user,message,context,ban_minutes):
     try:
         await message.delete()
         ban_minutes = int(ban_minutes)
@@ -430,9 +430,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     #    censor = "True"
     if censor == True:
         if any(word in message_text.split() for word in forbidden_words):
-            await mute_person(message)
-        elif any(word in message_text.split() for word in forbidden_phrases):
-            await mute_person(message)
+            await mute_person(user,message,context,ban_minutes)
+        elif any(phrase.search(message_text) for phrase in forbidden_phrases):
+            await mute_person(user,message,context,ban_minutes)
     #try:
     #    
     #    llm = channels[chat_id]["llm"]
