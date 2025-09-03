@@ -39,7 +39,7 @@ with open("channels.json", "r", encoding="utf-8") as f:
     channels = json.load(f)
 
 
-# Иные функцйии
+# Иные функции
 async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     """Проверяет, является ли пользователь админом группы."""
     if not update.message or not update.message.chat:
@@ -353,6 +353,9 @@ async def handle_captcha_response(update: Update, context: ContextTypes.DEFAULT_
 
 
 # Обработка сообщений
+
+
+async mute_person()
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     #if not update.message or not update.message.text:
